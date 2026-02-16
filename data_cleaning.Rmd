@@ -1,0 +1,169 @@
+---
+title: "Dataset1_Cleaning"
+author: "Tess Purin"
+date: "2026-02-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+
+setwd("C:/Users/tessp/OneDrive/Documents/MEDSL_Hiring_Exercise/hiring_exercise")
+
+data_raw <- read.csv("part1_data.csv")
+fips_data <- read.csv("part1_fips.csv", stringsAsFactors = FALSE)
+colnames(fips_data)
+
+colnames(data_raw)
+
+```
+
+1. Produce a cleaned dataset saved to part1_clean.csv
+
+```{r}
+#Fixing shifted row
+
+#deleted the two incorrect rows
+data_raw <- data_raw %>%
+  filter(Election != "1" & Election != "")
+
+#adding back in deleted row manually 
+new_row <- data.frame(
+  Election = "2024 General Election",
+  JurisdictionName = "Statewide",
+  ReportingCountyName = "Prairie County",
+  DataEntryJurisdictionName = "Sunnydale",
+  DataEntryLevelName = "Precinct",
+  Office = "US President & Vice President",
+  OfficeCategory = "Presidential Electors For US President & Vp",
+  BallotOrder = "20",
+  NameonBallot = "Susan Maude Buchser (W/I)",
+  PoliticalParty = "Other",
+  Winner = "No",
+  NumberofOfficeSeats = "1",
+  TotalVotes = "0",
+  stringsAsFactors = FALSE
+)
+
+#adding now cleaned row back to dataset
+data_raw <- bind_rows(data_raw, new_row)
+
+```
+
+
+```{r}
+clean_data <- data_raw %>%
+  transmute(
+    
+    precinct = DataEntryLevelName,
+    
+    office = str_to_upper(Office),
+    
+    candidate = str_to_upper(NameonBallot),
+    
+    party_detailed = str_to_upper(PoliticalParty),
+    
+    party_simplified = case_when(
+      str_detect(str_to_upper(PoliticalParty), "DEM") ~ "DEMOCRAT",
+      str_detect(str_to_upper(PoliticalParty), "REP") ~ "REPUBLICAN",
+      str_detect(str_to_upper(PoliticalParty), "LIB") ~ "LIBERTARIAN",
+      is.na(PoliticalParty) ~ NA_character_,
+      TRUE ~ "OTHER"
+    ),
+    
+    votes = as.numeric(gsub(",", "", TotalVotes)),
+    
+    county_name = str_to_upper(ReportingCountyName),
+    jurisdiction_name = str_to_upper(JurisdictionName),
+    
+    candidate = case_when(
+      is.na(NameonBallot) ~ NA_character_,
+      TRUE ~ str_to_upper(NameonBallot)
+    ),
+    
+    year = 2024,
+    stage = "GEN",
+    state = "IN",
+    special = "FALSE",
+    date = "2024-11-05"
+  )
+
+fips_data <- fips_data %>%
+  transmute(
+    county_name = str_to_upper(county_name),
+    county_fips = county_fips
+  )
+
+clean_data <- clean_data %>% 
+  left_join(fips_data, by = "county_name")
+
+write.csv(clean_data, "part1_clean.csv", row.names = FALSE)
+
+```
+
+2. Are there any issues with the quality of the raw data?
+
+Yes. I found that there was one row where the values had shifted over two columns to the right, and the values that should've been in the last two columns had been moved to their own additional row. I had found this error by checking the unique values in the columns, and finding that Election had a value of "1" in it, and that Office had the value "Sunnydale" in it .I was able to fix this, by deleting those two rows, and manually adding the data back in. In a case where that may not work due to the number of rows that had been shifted, and the size of the dataset I would probably isolate all of the rows that had been shifted into a data frame by sorting through common values, renaming the variables to what they should've been originally, and then merging this cleaned dataframe to the original dataset. 
+
+There was also an odd row of data that included the name "John Smith" as a write in, but it was spelt with symbols. It also was only reported in one county (CEDAR) and 0 votes were counted for this write it. I found this while looking for total votes across candidates. While odd, I opted to keep it in this dataset, just because maybe a candidate had mispelled John Smith, but I may opt to remove it depending on what I am trying to analyze. 
+
+
+
+3. Plot the distribution of votes across all candidates
+```{r}
+vote_totals <- clean_data %>%
+  group_by(candidate) %>%
+  summarise(total_votes = sum(votes, na.rm = TRUE)) %>%
+  arrange(desc(total_votes))
+
+#all candidates
+ggplot(vote_totals, aes(x = reorder(candidate, total_votes), y = total_votes, fill = candidate)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(
+    title = "All Candidates by Total Votes",
+    x = "Candidate",
+    y = "Total Votes"
+  )
+
+#Just top 2
+top2 <- vote_totals %>% slice_head(n = 2)
+
+ggplot(top2, aes(x = reorder(candidate, total_votes), y = total_votes, fill = candidate)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(
+    title = "Top 2 Candidates by Total Votes",
+    x = "Candidate",
+    y = "Total Votes"
+  )
+
+#Next 2 largest vote totals for candidates
+next2 <- vote_totals %>% slice(3:4)  # rows 3 through 4
+
+ggplot(next2, aes(x = reorder(candidate, total_votes), y = total_votes, fill = candidate)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(
+    title = "Next 2 Candidates by Total Votes",
+    x = "Candidate",
+    y = "Total Votes"
+  ) 
+
+#all other candidates in the dataset
+next13 <- vote_totals %>% slice(5:18)  # rows 5 through 18 (The rest of the candidates)
+ggplot(next13, aes(x = reorder(candidate, total_votes), y = total_votes, fill = candidate)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(
+    title = "The Rest of the Candidates by Total Votes",
+    x = "Candidate",
+    y = "Total Votes"
+  )
+```
+4. Is the cleaned data in a long or wide format? What about the raw data?
+
+Both the cleaned data and the raw data is in long format, given that each row has one candidate in one precinct, as opposed to it being one row per precinct. 
